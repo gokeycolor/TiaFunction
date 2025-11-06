@@ -1,0 +1,143 @@
+﻿FUNCTION "ISOLocalTime" : String
+TITLE = ISOtimestamp
+{ S7_Optimized_Access := 'TRUE' }
+AUTHOR : GKC
+FAMILY : Convert
+VERSION : 0.1
+//利用VAL_STRG将本地DTL格式时间转换为 IOS 格式
+   VAR_TEMP 
+      ISOTimstamp : String[24];
+      LocalTime {InstructionName := 'DTL'; LibVersion := '1.0'} : DTL;
+      ret : Int;
+      Nanosecond : UDInt;
+   END_VAR
+
+
+BEGIN
+	#ret := RD_LOC_T(#LocalTime);
+	VAL_STRG(IN := #LocalTime.YEAR,
+	         SIZE := 4,
+	         PREC := 0,
+	         FORMAT := 0000,
+	         P := 1,
+	         OUT => #ISOTimstamp);
+	#ISOTimstamp[5] := '-';
+	IF #LocalTime.MONTH < 10 THEN
+	    #ISOTimstamp[6] := '0';
+	    VAL_STRG(IN := #LocalTime.MONTH,
+	             SIZE := 1,
+	             PREC := 0,
+	             FORMAT := 0000,
+	             P := 7,
+	             OUT => #ISOTimstamp);
+	ELSE
+	    VAL_STRG(IN := #LocalTime.MONTH,
+	             SIZE := 2,
+	             PREC := 0,
+	             FORMAT := 0000,
+	             P := 6,
+	             OUT => #ISOTimstamp);
+	END_IF;
+	#ISOTimstamp[8] := '-';
+	
+	IF #LocalTime.DAY < 10 THEN
+	    #ISOTimstamp[9] := '0';
+	    VAL_STRG(IN := #LocalTime.DAY,
+	             SIZE := 1,
+	             PREC := 0,
+	             FORMAT := 0000,
+	             P := 10,
+	             OUT => #ISOTimstamp);
+	ELSE
+	    VAL_STRG(IN := #LocalTime.DAY,
+	             SIZE := 2,
+	             PREC := 0,
+	             FORMAT := 0000,
+	             P := 9,
+	             OUT => #ISOTimstamp);
+	END_IF;
+	#ISOTimstamp[11] := 'T';
+	IF #LocalTime.HOUR < 10 THEN
+	    #ISOTimstamp[12] := '0';
+	    VAL_STRG(IN := #LocalTime.HOUR,
+	             SIZE := 1,
+	             PREC := 0,
+	             FORMAT := 0000,
+	             P := 13,
+	             OUT => #ISOTimstamp);
+	ELSE
+	    VAL_STRG(IN := #LocalTime.HOUR,
+	             SIZE := 2,
+	             PREC := 0,
+	             FORMAT := 0000,
+	             P := 12,
+	             OUT => #ISOTimstamp);
+	END_IF;
+	#ISOTimstamp[14] := ':';
+	IF #LocalTime.MINUTE < 10 THEN
+	    #ISOTimstamp[15] := '0';
+	    VAL_STRG(IN := #LocalTime.MINUTE,
+	             SIZE := 1,
+	             PREC := 0,
+	             FORMAT := 0000,
+	             P := 16,
+	             OUT => #ISOTimstamp);
+	ELSE
+	    VAL_STRG(IN := #LocalTime.MINUTE,
+	             SIZE := 2,
+	             PREC := 0,
+	             FORMAT := 0000,
+	             P := 15,
+	             OUT => #ISOTimstamp);
+	END_IF;
+	#ISOTimstamp[17] := ':';
+	
+	IF #LocalTime.SECOND < 10 THEN
+	    #ISOTimstamp[18] := '0';
+	    VAL_STRG(IN := #LocalTime.MINUTE,
+	             SIZE := 1,
+	             PREC := 0,
+	             FORMAT := 0000,
+	             P := 19,
+	             OUT => #ISOTimstamp);
+	ELSE
+	    VAL_STRG(IN := #LocalTime.MINUTE,
+	             SIZE := 2,
+	             PREC := 0,
+	             FORMAT := 0000,
+	             P := 18,
+	             OUT => #ISOTimstamp);
+	END_IF;
+	#ISOTimstamp[20] := '.';
+	
+	#Nanosecond := #LocalTime.NANOSECOND / 1000000;
+	IF #Nanosecond < 10 THEN
+	    #ISOTimstamp[21] := '0';
+	    #ISOTimstamp[22] := '0';
+	    VAL_STRG(IN := #Nanosecond,
+	             SIZE := 1,
+	             PREC := 0,
+	             FORMAT := 0000,
+	             P := 23,
+	             OUT => #ISOTimstamp);
+	ELSIF  #Nanosecond >= 10 AND  #Nanosecond < 100 THEN
+	    #ISOTimstamp[21] := '0';
+	    VAL_STRG(IN := #Nanosecond,
+	             SIZE := 2,
+	             PREC := 0,
+	             FORMAT := 0000,
+	             P := 22,
+	             OUT => #ISOTimstamp);
+	ELSE
+	    VAL_STRG(IN := #Nanosecond,
+	             SIZE := 3,
+	             PREC := 0,
+	             FORMAT := 0000,
+	             P := 21,
+	             OUT => #ISOTimstamp);
+	END_IF;
+	#ISOTimstamp[24] := 'Z';
+	
+	#ISOLocalTime := #ISOTimstamp;
+END_FUNCTION
+

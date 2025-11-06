@@ -1,0 +1,452 @@
+﻿FUNCTION "8Byte2Str_1500" : String
+{ S7_Optimized_Access := 'TRUE' }
+AUTHOR : GKC
+FAMILY : Convert
+NAME : '8Byte2String'
+VERSION : 1.02
+//in：支持以下数据类型SINT/INT/DINT/USINT/UINT/UDINT/LINT/ULINT/REAL/LREAL 
+//Format：['s'][width]['.'prec]. s：带符号，width：整数部分长度，prec：小数部分长度
+//Int_Real2Str：返回字符串,Error=1时返回故障原因
+   VAR_INPUT 
+      in { S7_HiddenAssignment := 'Hide'} : Variant;   // 支持以下数据类型SINT/INT/DINT/USINT/UINT/UDINT/LINT/ULINT/REAL/LREAL
+      Format { S7_PredefinedAssignment := '$'$''} : String;   // [“s"] [width] ["." prec]
+   END_VAR
+
+   VAR_OUTPUT 
+      Error : Bool;
+   END_VAR
+
+   VAR_TEMP 
+      DataType : Struct
+         "SINT" : SInt;
+         "INT" : Int;
+         "DINT" : DInt;
+         "USINT" : USInt;
+         "UINT" : UInt;
+         "UDINT" : UDInt;
+         "LINT" : LInt;
+         "ULINT" : ULInt;
+         "REAL" : Real;
+         "LREAL" : LReal;
+      END_STRUCT;
+      input_ULInt : ULInt;
+      TypeofInput : Int;
+      k : Int;
+      j : Int;
+      i : Int;
+      sign : Char;
+      CharString : String;
+      TempString : String;
+      IntegerLen : Int;   // ULINT<=20
+      DecimalLen : Int;   // Lreal<=15,Real<=7
+      input_LReal : LReal;
+      IntPart : ULInt;
+      DecimalPart : LReal;
+      CharBuffer : Array[0..60] of Struct
+         pos : Int;
+         value : Int;
+      END_STRUCT;
+      CharBufferLen : Int;
+      LrealLword : LWord;
+      RealDword : DWord;
+      printReal : Bool;
+      DecimalFlag : Bool;
+      DisplaySign : Bool;   // 1=显示符号, 0=不显示+号
+      carryFlag : Bool;
+   END_VAR
+
+   VAR CONSTANT 
+      "SINT" : Int := 1;
+      "INT" : Int := 2;
+      "DINT" : Int := 3;
+      "USINT" : Int := 4;
+      "UINT" : Int := 5;
+      "UDINT" : Int := 6;
+      "LINT" : Int := 7;
+      "ULINT" : Int := 8;
+      "REAL" : Int := 9;
+      "LREAL" : Int := 10;
+      MAXLEN : Int := 254;
+      SIGNBITLOW : Char := 's';
+      SIGNBITCAP : Char := 'S';
+      DISPLAYMAXREAL : LReal := 1.84467440737095E+19;
+      DISPLAYMINREAL : LReal := -1.84467440737095E+19;
+   END_VAR
+
+
+BEGIN
+	REGION #initialization
+	    ENO := 1;
+	    #Error := FALSE;
+	    #IntegerLen := 0;
+	    #DecimalLen := 0;
+	    #TempString := #Format;
+	    #sign := '+';
+	    #DecimalPart := 0.0;
+	    #IntPart := 0;
+	    #printReal := 0;
+	    #DecimalFlag := FALSE;
+	    #CharBufferLen := 0;
+	    #CharString := '';
+	    IF #TempString[1] = #SIGNBITLOW OR #TempString[1] = #SIGNBITCAP THEN
+	        #DisplaySign := TRUE;
+	        #TempString := DELETE(IN := #TempString, L := 1, P := 1);
+	    ELSE
+	        #DisplaySign := FALSE;
+	    END_IF;
+	END_REGION
+	
+	REGION check whether Format string is valid
+	    IF LEN(#TempString) <> 0 THEN
+	        #j := 0;
+	        FOR #i := 1 TO LEN(#TempString) DO
+	            #k := CHAR_TO_SINT(#TempString[#i]) - 48;
+	            CASE #k OF
+	                0..9:
+	                    IF #DecimalFlag THEN
+	                        #DecimalLen := #DecimalLen * 10 + #k;
+	                    ELSE
+	                        #IntegerLen := #IntegerLen * 10 + #k;
+	                    END_IF;
+	                -2:  //'.'
+	                    #j := #j + 1;
+	                    #DecimalFlag := TRUE;
+	                    IF #j >= 2 THEN
+	                        GOTO err1;
+	                    END_IF;
+	                ELSE
+	                    GOTO err1;
+	                    ;
+	            END_CASE;
+	        END_FOR;
+	    END_IF;
+	    IF BOOL_TO_INT(#DisplaySign) + #IntegerLen + BOOL_TO_INT(#DecimalLen > 0) + #DecimalLen > 254
+	    THEN
+	        GOTO err3;
+	    END_IF;
+	    #TempString := '';
+	END_REGION
+	
+	REGION check input data type
+	    
+	    IF TypeOf(#in) = SInt THEN
+	        #TypeofInput := #SINT;
+	    ELSIF TypeOf(#in) = Int THEN
+	        #TypeofInput := #INT;
+	    ELSIF TypeOf(#in) = DInt THEN
+	        #TypeofInput := #DINT;
+	    ELSIF TypeOf(#in) = USInt THEN
+	        #TypeofInput := #USINT;
+	    ELSIF TypeOf(#in) = UInt THEN
+	        #TypeofInput := #UINT;
+	    ELSIF TypeOf(#in) = UDInt THEN
+	        #TypeofInput := #UDINT;
+	    ELSIF TypeOf(#in) = LInt THEN
+	        #TypeofInput := #LINT;
+	    ELSIF TypeOf(#in) = ULInt THEN
+	        #TypeofInput := #ULINT;
+	    ELSIF TypeOf(#in) = Real THEN
+	        #TypeofInput := #REAL;
+	    ELSIF TypeOf(#in) = LReal THEN
+	        #TypeofInput := #LREAL;
+	    END_IF;
+	    
+	    CASE #TypeofInput OF
+	        #SINT:
+	            VariantGet(SRC := #in,
+	                       DST => #DataType."SINT");
+	            IF #DataType."SINT" < 0 THEN
+	                #DisplaySign := TRUE;
+	                #sign := '-';
+	                #input_ULInt := WORD_TO_ULINT(NOT SINT_TO_BYTE(#DataType."SINT")) + 1;
+	            ELSE
+	                #input_ULInt := INT_TO_ULINT(#DataType."SINT");
+	            END_IF;
+	        #INT:
+	            ;
+	            VariantGet(SRC := #in,
+	                       DST => #DataType."INT");
+	            IF #DataType."INT" < 0 THEN
+	                #DisplaySign := TRUE;
+	                #sign := '-';
+	                #input_ULInt := WORD_TO_ULINT(NOT INT_TO_WORD(#DataType."INT")) + 1;
+	            ELSE
+	                #input_ULInt := INT_TO_ULINT(#DataType."INT");
+	            END_IF;
+	            
+	        #DINT:
+	            ;
+	            VariantGet(SRC := #in,
+	                       DST => #DataType."DINT");
+	            IF #DataType."DINT" < 0 THEN
+	                #DisplaySign := TRUE;
+	                #sign := '-';
+	                #input_ULInt := DWORD_TO_ULINT(NOT DINT_TO_DWORD(#DataType."DINT")) + 1;
+	            ELSE
+	                #input_ULInt := DINT_TO_ULINT(#DataType."DINT");
+	            END_IF;
+	        #USINT:
+	            ;
+	            VariantGet(SRC := #in,
+	                       DST => #DataType."USINT");
+	            #input_ULInt := USINT_TO_ULINT(#DataType."USINT");
+	        #UINT:
+	            ;
+	            VariantGet(SRC := #in,
+	                       DST => #DataType."UINT");
+	            #input_ULInt := UINT_TO_ULINT(#DataType."UINT");
+	        #UDINT:
+	            ;
+	            VariantGet(SRC := #in,
+	                       DST => #DataType."UDINT");
+	            #input_ULInt := UDINT_TO_ULINT(#DataType."UDINT");
+	        #LINT:
+	            ;
+	            VariantGet(SRC := #in,
+	                       DST => #DataType."LINT");
+	            IF #DataType."LINT" < 0 THEN
+	                #DisplaySign := TRUE;
+	                #sign := '-';
+	                #input_ULInt := LWORD_TO_ULINT(NOT LINT_TO_LWORD(#DataType."LINT")) + 1;
+	            ELSE
+	                #input_ULInt := LINT_TO_ULINT(#DataType."LINT");
+	            END_IF;
+	            
+	        #ULINT:
+	            ;
+	            VariantGet(SRC := #in,
+	                       DST => #DataType."ULINT");
+	            #input_ULInt := #DataType."ULINT";
+	        #REAL:
+	            ;
+	            VariantGet(SRC := #in,
+	                       DST => #DataType."REAL");
+	            #RealDword := REAL_TO_DWORD(#DataType."REAL");
+	            IF (#RealDword.%W1 AND 16#7f80) = 16#7f80 THEN
+	                IF (#RealDword AND 16#7fffff) <> 16#0 THEN
+	                    GOTO err4;
+	                ELSE
+	                    #TempString := REAL_TO_STRING(#DataType."REAL");
+	                    GOTO output;
+	                END_IF;
+	            END_IF;
+	            IF #RealDword.%X31 THEN
+	                #DisplaySign := TRUE;
+	                #sign := '-';
+	            END_IF;
+	            #input_LReal := REAL_TO_LREAL(ABS(#DataType."REAL"));
+	        #LREAL:
+	            ;
+	            VariantGet(SRC := #in,
+	                       DST => #DataType."LREAL");
+	            #LrealLword := LREAL_TO_LWORD(#DataType."LREAL");
+	            IF (#LrealLword.%W3 AND 16#7ff0) = 16#7ff0 THEN
+	                IF (#LrealLword AND 16#fffffffffffff) <> 16#0 THEN
+	                    GOTO err4;
+	                ELSE
+	                    #TempString := LREAL_TO_STRING(#DataType."LREAL");
+	                    GOTO output;
+	                END_IF;
+	            END_IF;
+	            IF #LrealLword.%X63 THEN
+	                #DisplaySign := TRUE;
+	                #sign := '-';
+	            END_IF;
+	            #input_LReal := ABS(#DataType."LREAL");
+	            
+	        ELSE
+	            GOTO err2;
+	    END_CASE;
+	END_REGION
+	
+	REGION convert part
+	    CASE #TypeofInput OF
+	        #SINT..#ULINT:
+	            GOTO printInt;
+	        #REAL, #LREAL:
+	            GOTO HandleREAL;
+	    END_CASE;
+	END_REGION
+	
+	REGION HandleREAL
+	HandleREAL:
+	    IF #input_LReal > #DISPLAYMAXREAL OR #input_LReal < #DISPLAYMINREAL THEN
+	        #TempString := LREAL_TO_STRING(#input_LReal);
+	        IF NOT #DisplaySign THEN
+	            #TempString := DELETE_STRING(IN := #TempString, L := 1, P := 1);
+	        ELSE
+	            #TempString[1] := #sign;
+	        END_IF;
+	        GOTO output;
+	    END_IF;
+	    
+	    #IntPart := LREAL_TO_ULINT(TRUNC_LREAL(#input_LReal));
+	    #DecimalPart := #input_LReal - ULINT_TO_LREAL(#IntPart);
+	    #input_ULInt := #IntPart;
+	    #printReal := 1;
+	END_REGION
+	
+	REGION printDecim    
+	    #carryFlag := FALSE;
+	    #CharBufferLen := 0;
+	    IF #DecimalLen <> 0 THEN
+	        FOR #i := 0 TO #DecimalLen - 1 DO
+	            #CharString[#i + 1] := '0';
+	            #j := REAL_TO_USINT(TRUNC_REAL(#DecimalPart * 10.0));
+	            IF #j <> 0 THEN
+	                IF #CharBufferLen >= 59 THEN
+	                    #CharBuffer[59].pos := #i;
+	                    #CharBuffer[59].value := #j;
+	                    CONTINUE;
+	                END_IF;
+	                #CharBuffer[#CharBufferLen].pos := #i;
+	                #CharBuffer[#CharBufferLen].value := #j;
+	                #CharBufferLen := #CharBufferLen + 1;
+	            END_IF;
+	            #DecimalPart := #DecimalPart * 10.0 - INT_TO_REAL(#j);
+	        END_FOR;
+	    END_IF;
+	    IF #CharBufferLen >= 59 THEN
+	        #j := #CharBuffer[59].value;
+	        #k := 59;
+	    ELSE
+	        #j := REAL_TO_USINT(TRUNC_REAL(#DecimalPart * 10.0));
+	        #k := #CharBufferLen;
+	        #CharBuffer[#k].pos := #DecimalLen;
+	        #CharBuffer[#k].value := #j;
+	    END_IF;
+	    IF #CharBufferLen > 0 THEN
+	        IF #CharBuffer[#k].value >= 6 OR
+	            (#j = 5 AND #DecimalPart <> 0) OR
+	            (#j = 5 AND #CharBuffer[#CharBufferLen - 1].pos = #DecimalLen - 1 AND
+	            #CharBuffer[#CharBufferLen - 1].value MOD 2 <> 0)
+	        THEN
+	            #carryFlag := TRUE;
+	        END_IF;
+	    ELSE
+	        IF #CharBuffer[#k].value >= 6 OR (#j = 5 AND #DecimalPart <> 0) THEN
+	            #carryFlag := TRUE;
+	        END_IF;
+	    END_IF;
+	    
+	    IF #carryFlag THEN
+	        #CharBuffer[#k].value := 10;
+	        FOR #i := #k TO 0 BY -1 DO
+	            IF #CharBuffer[#i].value = 10 THEN
+	                #CharBuffer[#i].value := 0;
+	                IF #i = 0 THEN
+	                    IF #CharBuffer[#i].pos = 0 THEN
+	                        #IntPart := #IntPart + 1;
+	                    ELSE
+	                        #CharBuffer[#k].pos := #CharBuffer[#i].pos - 1;
+	                        #CharBuffer[#k].value := 1;
+	                        #CharBufferLen := #CharBufferLen + 1;
+	                    END_IF;
+	                ELSE
+	                    IF #CharBuffer[#i].pos - #CharBuffer[#i - 1].pos = 1 THEN
+	                        #CharBuffer[#i - 1].value := #CharBuffer[#i - 1].value + 1;
+	                    ELSE
+	                        #CharBuffer[#i].value := 1;
+	                        #CharBuffer[#i].pos := #CharBuffer[#i].pos - 1;
+	                        #CharBufferLen := #CharBufferLen + 1;
+	                    END_IF;
+	                END_IF;
+	            END_IF;
+	        END_FOR;
+	    END_IF;
+	    FOR #i := 0 TO #CharBufferLen - 1 DO
+	        #CharString[#CharBuffer[#i].pos + 1] := INT_TO_CHAR(#CharBuffer[#i].value + 48);
+	    END_FOR;
+	    #input_ULInt := #IntPart;
+	END_REGION
+	
+	REGION PrintINT
+	printInt:
+	    #CharBufferLen := 0;
+	    IF BOOL_TO_INT(#DisplaySign) + #IntegerLen + BOOL_TO_INT(#DecimalLen > 0) + #DecimalLen > 254
+	    THEN
+	        GOTO err3;
+	    END_IF;
+	    WHILE #input_ULInt / 10 >= 0 DO
+	        #CharBufferLen := #CharBufferLen + 1;
+	        #CharBuffer[#CharBufferLen].value := ULINT_TO_INT(#input_ULInt MOD 10);
+	        #input_ULInt := #input_ULInt / 10;
+	        IF #input_ULInt = 0 THEN
+	            EXIT;
+	        END_IF;
+	    END_WHILE;
+	    IF #DisplaySign THEN
+	        #TempString[1] := #sign;
+	    END_IF;
+	    #k := #CharBufferLen;
+	    IF #IntegerLen < #CharBufferLen THEN
+	        #j := #CharBufferLen + BOOL_TO_INT(#DisplaySign);
+	    ELSE
+	        #j := #IntegerLen + BOOL_TO_INT(#DisplaySign);
+	    END_IF;
+	    
+	    FOR #i := BOOL_TO_INT(#DisplaySign) + 1 TO #j DO
+	        IF #DisplaySign THEN
+	            IF #i < #j + BOOL_TO_INT(#DisplaySign) - #k THEN
+	                #TempString[#i] := '0';
+	                CONTINUE;
+	            END_IF;
+	        ELSE
+	            IF #i <= #j + BOOL_TO_INT(#DisplaySign) - #k THEN
+	                #TempString[#i] := '0';
+	                CONTINUE;
+	            END_IF;
+	        END_IF;
+	        
+	        #TempString[#i] := INT_TO_CHAR(#CharBuffer[#CharBufferLen].value + 48);
+	        #CharBufferLen := #CharBufferLen - 1;
+	        
+	    END_FOR;
+	    
+	    #i := LEN(#TempString);
+	    
+	    IF NOT #printReal THEN
+	        IF #DecimalLen > 0 THEN
+	            #TempString[#i + 1] := '.';
+	            FOR #j := #i + 2 TO #DecimalLen + #i + 1 DO
+	                #TempString[#j] := '0';
+	            END_FOR;
+	        END_IF;
+	    ELSE
+	        IF #DecimalLen = 0 THEN
+	            GOTO output;
+	        ELSE
+	            #TempString[LEN(#TempString) + 1] := '.';
+	            #TempString := CONCAT_STRING(IN1 := #TempString, IN2 := #CharString);
+	        END_IF;
+	    END_IF;
+	    GOTO output;
+	END_REGION
+	
+	REGION ouput
+	output:
+	    #"8Byte2Str_1500" := #TempString;
+	    RETURN;
+	err1:
+	    #"8Byte2Str_1500" := 'Error: Format Parameter: invalid';
+	    GOTO end;
+	err2:
+	    #"8Byte2Str_1500" := 'Error: In Parameter: data type invalid';
+	    GOTO end;
+	err3:
+	    #"8Byte2Str_1500" := 'Error: Format Parameter: String length exceeds 254 characters';
+	    GOTO end;
+	err4:
+	    #"8Byte2Str_1500" := 'Error: In Parameter: invalid Real or Lreal';
+	    GOTO end;
+	err5:
+	    #"8Byte2Str_1500" := 'Error: In Parameter: out of operating range';
+	end:
+	    #Error := TRUE;
+	    ENO := 0;
+	    RETURN;
+	END_REGION
+	
+	
+END_FUNCTION
+
