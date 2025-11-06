@@ -2,6 +2,7 @@
 ## 1. 4Byte2Str
 ## 2. 8Byte2Str
 ## 3. ISODate
+## 4. PtpPolling
 ### 编辑环境
 TIA v15.1 
 #### 功能介绍
